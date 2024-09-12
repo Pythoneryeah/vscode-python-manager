@@ -3,9 +3,39 @@
 
 'use strict';
 
+import { ExtensionContext } from 'vscode';
 import { Architecture } from '../../common/utils/platform';
 import { PythonEnvType } from '../base/info';
 import { PythonVersion } from './pythonVersion';
+
+class ContextManager {
+    private static instance: ContextManager;
+    private context!: ExtensionContext;
+
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    private constructor() { }
+
+    static getInstance(): ContextManager {
+        if (!ContextManager.instance) {
+            ContextManager.instance = new ContextManager();
+        }
+        return ContextManager.instance;
+    }
+
+    setContext(context: ExtensionContext) {
+        this.context = context;
+    }
+
+    getContext(): ExtensionContext {
+        return this.context;
+    }
+}
+
+export default ContextManager;
+
+export type PySparkParam = {
+    [key: string]: string
+}
 
 /**
  * The supported Python environment types.

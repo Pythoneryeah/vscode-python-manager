@@ -1,6 +1,12 @@
-import { Environment } from '@vscode/python-extension';
-import { CancellationError, ProgressLocation, QuickPickItem, window } from 'vscode';
-import { traceError } from '../client/logging';
+import { Environment, ResolvedEnvironment } from '@vscode/python-extension';
+import { CancellationError, Progress, ProgressLocation, QuickPickItem, window } from 'vscode';
+// import { exec } from 'child_process';
+// import { promisify } from 'util';
+import axios from 'axios';
+import { exec } from 'child_process';
+import * as fs from 'fs-extra';
+import { v4 as uuidv4 } from 'uuid';
+import { traceError, traceVerbose } from '../client/logging';
 import {
     OutdatedPipPackageInfo,
     PipPackageInfo,
@@ -25,7 +31,7 @@ import {
     updateCondaPackages,
 } from './tools/conda';
 import { getEnvironmentType, isCondaEnvironment } from './utils';
-import { EnvironmentType } from '../client/pythonEnvironments/info';
+import ContextManager, { EnvironmentType, PySparkParam } from '../client/pythonEnvironments/info';
 import {
     exportPoetryPackages,
     getPoetryPackageInstallSpawnOptions,
@@ -36,6 +42,9 @@ import {
 import { SpawnOptions } from '../client/common/process/types';
 import { getEnvLoggingInfo, reportStdOutProgress } from './helpers';
 import { searchPackageWithProvider } from './packageSearch';
+import { Conda } from '../client/pythonEnvironments/common/environmentManagers/conda';
+import { execObservable } from '../client/common/process/rawProcessApis';
+
 
 export type PackageInfo = PipPackageInfo | CondaPackageInfo;
 export type OutdatedPackageInfo = OutdatedPipPackageInfo;
@@ -140,6 +149,187 @@ export async function exportPackages(env: Environment) {
         return exportPipPackages(env);
     } catch (ex) {
         traceError(`Failed to export environment ${env.id}`, ex);
+    }
+}
+
+interface PySparkEnvironmentMeta {
+    id: number;
+    proId: number;
+    name: string;
+    hdfsPath: string;
+    detail: string;
+    description: string | null;
+    createBy: string;
+    createTime: string;
+    level: number;
+}
+
+async function fetchPySparkEnvironmentMeta(proId: string, name: string, level: number): Promise<PySparkEnvironmentMeta> {
+    try {
+        if (level === undefined || level === null) {
+            level = 1;
+        }
+        const response = await axios.get<PySparkEnvironmentMeta>(`${ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr')}/api/v1/env/pyspark/meta`, {
+            params: { proId, name, level },
+            headers: {
+                'Cookie': 'token=2345fc15-fe44-4e3b-afbc-24688c2f5f70;userId=idegw',
+                'Content-Type': 'application/json',
+                'operator': 'hu.tan@msxf.com'
+            }
+        });
+
+        return response.data;
+    } catch (error) {
+        console.error('Error fetching PySpark environment meta:', error);
+        throw error;
+    }
+}
+
+/**
+ * 解压 tar.gz 文件到指定目录
+ * @param tarGzFilePath 要解压的 tar.gz 文件路径
+ * @param targetDirectory 目标目录
+ */
+async function unpackCondaEnvironment(tarGzFilePath: string, targetDirectory: string): Promise<void> {
+    try {
+        // 检查 targetDirectory 是否存在，不存在则创建
+        await fs.mkdir(targetDirectory, { recursive: true });
+
+        // 构造解压命令
+        const command = `tar -xzf ${tarGzFilePath} -C ${targetDirectory}`;
+
+        // 执行解压命令
+        await new Promise<void>((resolve, reject) => {
+            exec(command, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Error occurred while unpacking: ${stderr}`);
+                    reject(error);
+                    return;
+                }
+                console.log(`stdout: ${stdout}`);
+                console.log(`Successfully unpacked to ${targetDirectory}`);
+                resolve();
+            });
+        });
+    } catch (error) {
+        // 使用 instanceof 检查 error 是否是 Error 对象
+        if (error instanceof Error) {
+            console.error(`Failed to unpack environment: ${error.message}`);
+        } else {
+            console.error('Failed to unpack environment: An unknown error occurred.');
+        }
+        throw error;
+    }
+}
+
+export async function createCondaEnvironment(
+    env: Environment | ResolvedEnvironment,
+    progress: Progress<{ message?: string | undefined; increment?: number | undefined }>,
+) {
+    if (!env.environment?.name) {
+        return;
+    }
+    const conda = await Conda.getConda();
+    if (!conda) {
+        return;
+    }
+    const message = `Download conda environment ${getEnvLoggingInfo(env)}`;
+    traceVerbose(message);
+    progress.report({ message });
+    // const hdfs = `hdfs://ms-dwh/tmp/${env.environment?.name}.tar.gz`
+    // 调用示例
+    // const proId = 1;
+    // 获取存储的 PySparkParam 对象
+    const pySparkParam = ContextManager.getInstance().getContext().globalState.get<PySparkParam>('pyspark.paramRegister');
+
+    let proId = "0";
+    // 检查是否成功获取到数据
+    if (pySparkParam) {
+        // 通过属性名获取 projectId 和 projectCode
+        const { projectId } = pySparkParam;
+        const { projectCode } = pySparkParam;
+
+        console.log(`createCondaEnvironment Project ID: ${projectId}`);
+        console.log(`createCondaEnvironment Project Code: ${projectCode}`);
+
+        if (projectId) {
+            proId = projectId;
+        }
+    } else {
+        console.log('No PySparkParam found in global state.');
+    }
+    await fetchPySparkEnvironmentMeta(proId, env.environment.name, env.environment.level)
+        .then(async (data) => {
+            console.log('Environment Meta:', data);
+            const hdfs = data.hdfsPath;
+            traceError(`env hdfs dir: ${hdfs}`)
+            // /tmp/env1.tar.gz
+            // 生成一个 UUID
+            const uniqueId = uuidv4();
+            const localTmpTar = `/tmp/${uniqueId}.tar.gz`;
+            const result1 = execObservable("hdfs", ["dfs", "-get", hdfs, localTmpTar], { timeout: 600_000 });
+            await new Promise<void>((resolve) => {
+                result1.out.subscribe({
+                    next: (output) => progress.report({ message: output.out }),
+                    error: (err) => {
+                        console.error('Error occurred:', err);
+                    },
+                    complete: () => resolve(),
+                });
+            });
+
+            const condaInfo = await conda.getInfo();
+            const firstEnvDir = condaInfo.envs_dirs && condaInfo.envs_dirs.length > 0 ? condaInfo.envs_dirs[0] : undefined;
+
+            // ----------------------------part.2 项目空间拉取的环境------------
+            if (firstEnvDir) {
+                console.info(`conda envs dir: ${firstEnvDir}`)
+                // tar -xvzf my_environment.tar.gz -C /opt/my_environment --strip-components=1
+                // unpackCondaEnvironment(localTmpTar, `${firstEnvDir}/${env.environment?.name}`)
+                //     .then(() => {
+                //         console.log('Environment unpacked successfully.');
+                //     })
+                //     .catch((error) => {
+                //         console.error('Failed to unpack environment:', error);
+                //     });
+                // if (fs.existsSync(localTmpTar)) {
+                //     // 删除已存在的文件
+                //     console.log('Environment download successfully. Delete tmp data.');
+                //     fs.unlinkSync(localTmpTar);
+                // }
+
+                try {
+                    await unpackCondaEnvironment(localTmpTar, `${firstEnvDir}/${env.environment?.name}`);
+                    console.log('Environment unpacked successfully.');
+
+                    if (fs.existsSync(localTmpTar)) {
+                        // 删除已存在的文件
+                        console.log('Environment download successfully. Delete tmp data.');
+                        fs.unlinkSync(localTmpTar);
+                    }
+                } catch (error) {
+                    console.error('Failed to unpack environment:', error);
+                }
+            }
+
+        })
+        .catch((error) => {
+            console.error('Failed to fetch environment meta:', error);
+        });
+
+    // const result = execObservable("cp", ["-r", `/tmp/${env.environment?.name}.tar.gz`, "~/.conda/envs/"], { timeout: 60_000 });
+    // await new Promise<void>((resolve) => {
+    //     result.out.subscribe({
+    //         next: (output) => progress.report({ message: output.out }),
+    //         error: (err) => {
+    //             console.error('Error occurred:', err);
+    //         },
+    //         complete: () => resolve(),
+    //     });
+    // });
+
+    return {
+        envName: env.environment?.name
     }
 }
 

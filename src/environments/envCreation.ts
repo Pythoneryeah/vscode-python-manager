@@ -37,7 +37,8 @@ export function activate(context: ExtensionContext) {
                 return;
             }
 
-            const provider = _createEnvironmentProviders.getAll().find((e) => e.tools.includes(type));
+            const provider =
+                _createEnvironmentProviders.getAll().find((e) => e.tools.includes(type));
             if (!provider) {
                 return;
             }

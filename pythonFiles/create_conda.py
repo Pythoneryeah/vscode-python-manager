@@ -112,7 +112,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "conda",
                 "create",
                 "--yes",
-                "--prefix",
+                "--name",
                 args.name,
                 f"python={args.python}",
             ],
@@ -120,8 +120,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         )
         env_path = get_conda_env_path(args.name)
         print(f"CREATED_CONDA_ENV:{env_path}")
-        if args.git_ignore:
-            add_gitignore(args.name)
+        # if args.git_ignore:
+        #     add_gitignore(args.name)
 
     if args.install:
         install_packages(env_path)

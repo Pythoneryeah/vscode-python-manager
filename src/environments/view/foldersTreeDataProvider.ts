@@ -46,7 +46,7 @@ export class ActiveWorkspaceEnvironment {
     public asTreeItem(api: PythonExtension, envTreeProvider: PythonEnvironmentTreeDataProvider) {
         const env = this.asNode(api);
         if (env) {
-            return envTreeProvider.getTreeItem(env, TreeItemCollapsibleState.Expanded);
+            return envTreeProvider.getTreeItem(env, TreeItemCollapsibleState.Collapsed);
         }
         const label =
             (workspace.workspaceFolders?.length || 0) > 1
@@ -70,7 +70,7 @@ export class WorkspaceFolderWrapper {
                 return new EnvironmentWrapper(env, this.canEnvBeDeleted).asTreeItem(api);
             }
         }
-        const tree = new TreeItem(this.folder.name, TreeItemCollapsibleState.Expanded);
+        const tree = new TreeItem(this.folder.name, TreeItemCollapsibleState.Collapsed);
         // tree.description = 'Environment no longer found, please try refreshing';
         tree.iconPath = new ThemeIcon('folder');
         return tree;
@@ -80,7 +80,7 @@ export class WorkspaceFolderEnvironments {
     constructor(public readonly folder: WorkspaceFolder) { }
 
     public asTreeItem() {
-        const tree = new TreeItem('Workspace Envs', TreeItemCollapsibleState.Expanded);
+        const tree = new TreeItem('Workspace Envs', TreeItemCollapsibleState.Collapsed);
         // tree.description = 'Environment no longer found, please try refreshing';
         tree.iconPath = new ThemeIcon('folder');
         return tree;

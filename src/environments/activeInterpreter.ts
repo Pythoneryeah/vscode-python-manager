@@ -1,36 +1,247 @@
-import { PythonExtension } from '@vscode/python-extension';
-import { commands, ExtensionContext, window, workspace, WorkspaceFolder } from 'vscode';
+import { CancellationToken, commands, ExtensionContext, Progress, ProgressLocation, window } from 'vscode';
+import axios from 'axios';
+import { execSync } from 'child_process';
 import { EnvironmentWrapper } from './view/types';
-import { noop } from '../client/common/utils/misc';
+import { getEnvDisplayInfo, getEnvLoggingInfo } from './helpers';
+import { exportCondaEnv, packageCondaEnv } from './tools/conda';
+
+import { traceError } from '../client/logging';
+import { withProgress } from '../client/common/vscodeApis/windowApis';
+import ContextManager, { PySparkParam } from '../client/pythonEnvironments/info';
 
 export function activate(context: ExtensionContext) {
     context.subscriptions.push(
         commands.registerCommand(
-            'python.envManager.setAsActiveInterpreter',
-            async (item: EnvironmentWrapper | { id: string }) => {
-                const api = await PythonExtension.api();
-                const env = 'env' in item ? item.env : api.environments.known.find((e) => e.id === item.id);
-                if (!env) {
+            'python.envManager.submitEnv',
+            async (options: EnvironmentWrapper) => {
+
+                const name = options.env.environment?.name
+                if (!options.env.version) {
+                    // Handle unknown version case
+                    console.log("Version is unknown.");
+                    window.showErrorMessage(`环境 ${name} 的 python 版本异常`);
                     return;
                 }
-                // eslint-disable-next-line no-nested-ternary
-                let folder: WorkspaceFolder | undefined;
-                if ('owningFolder' in item && item.owningFolder) {
-                    folder = item.owningFolder;
-                } else if (Array.isArray(workspace.workspaceFolders) && workspace.workspaceFolders.length > 0) {
-                    folder =
-                        workspace.workspaceFolders.length === 1
-                            ? workspace.workspaceFolders[0]
-                            : await window.showWorkspaceFolderPick({
-                                  placeHolder: 'Select folder to change active Python Environment',
-                              });
+
+                const version = `${options.env.version.major}.${options.env.version.minor}.${options.env.version.micro}`;
+                if (options.env.version.major !== 3) {
+                    // Handle unknown version case
+                    console.log(`Version is invalid. ${version}}`);
+                    window.showErrorMessage(`环境 ${name} 的 python 版本为 ${version}, 当前仅支持 python3。`);
+                    return;
                 }
-                if (folder) {
-                    api.environments.updateActiveEnvironmentPath(env, folder.uri).catch(noop);
+
+
+
+                const message = `确定要提交环境 '${getEnvDisplayInfo(options.env)}' 吗？`;
+                const detail = `上传'${getEnvDisplayInfo(options.env)}' 至项目空间。`;
+                if ((await window.showInformationMessage(message, { modal: true, detail }, 'Yes')) !== 'Yes') {
+                    return;
+                }
+
+                console.log(`1111111111 ${getEnvDisplayInfo(options.env)}`)
+                console.log("1. 获取环境的name......")
+                console.log(`1111111111 ${name}`)
+                if (!name) {
+                    return;
+                }
+                console.log("2. 获取环境的yaml......")
+                const condaYml = await exportCondaEnv(name)
+                console.log(`3. 获取环境的yaml......yml content: ${condaYml}`)
+                console.log("4. 请求gateway接口，查询环境是否重名")
+                if (!name) {
+                    return window.showErrorMessage(`环境元数据异常~`);
+                }
+
+                // const context1 = ContextManager.getInstance().getContext()
+                // traceError(context1 === context)
+                // const addr = ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr');
+                // traceError(addr);
+                // const addr1 = context.globalState.get<string>('gateway.addr');
+                // traceError(addr1);
+                // 获取存储的 PySparkParam 对象
+                const pySparkParam = context.globalState.get<PySparkParam>('pyspark.paramRegister');
+                // const pySparkParam = ContextManager.getInstance().getContext().globalState.get<PySparkParam>('pyspark.paramRegister');
+                let proId = "";
+                // 检查是否成功获取到数据
+                if (pySparkParam) {
+                    // 通过属性名获取 projectId 和 projectCode
+                    const { projectId } = pySparkParam;
+                    const { projectCode } = pySparkParam;
+                    proId = projectId;
+                    console.log(`submitEnv Project ID: ${projectId}`);
+                    console.log(`submitEnv Project Code: ${projectCode}`);
                 } else {
-                    commands.executeCommand('python.setInterpreter').then(noop, noop);
+                    console.log('No PySparkParam found in global state.');
+                    window.showErrorMessage(`环境 ${name} 提交失败：No PySparkParam found in global state.`);
+                    return;
+                }
+
+                // 请求 gateway，检测环境是否已存在
+                const checkResult = await checkEnvironmentName(proId, name, condaYml);
+                console.log('Check name result:', checkResult);
+                if (checkResult) {
+                    console.log('Environment name is available.');
+                    if (checkResult === name) {
+                        window.showErrorMessage(`环境 ${name} 提交失败, 环境命名冲突。`);
+                    } else {
+                        window.showErrorMessage(`环境 ${name} 提交失败, 该项目空间中已经存在相同的环境包 ${checkResult} `);
+                    }
+                    return; // Terminate execution if result is truthy
+                }
+
+                console.log("5. 打包....")
+                // conda pack -n myenv' -o 'myenv.tar.gz'"
+
+                // try {
+                //     await withProgress(
+                //         {
+                //             location: ProgressLocation.Notification,
+                //             title: `提交环境 ${getEnvDisplayInfo(options.env)}`,
+                //             cancellable: true,
+                //         },
+                //         async (
+                //             progress: Progress<{ message?: string | undefined; increment?: number | undefined }>,
+                //             _token: CancellationToken,
+                //         ) => {
+                //             console.log("push env.....");
+                //             const result = await packageCondaEnv(options.env, progress);
+                //             if (result) {
+                //                 const { envName, filePath, hdfsDir } = result;
+                //                 // 使用filePath
+                //                 console.log(`提交至项目空间：${envName}, ${filePath}}, ${hdfsDir}...`)
+
+                //                 const environmentData: EnvironmentData = {
+                //                     proId,
+                //                     name: `${envName}`,
+                //                     hdfsPath: `${hdfsDir}`,
+                //                     detail: `${condaYml}`,
+                //                     createBy: `${process.env.DSP_USER}`,
+                //                     level: 1
+                //                 };
+
+                //                 submitEnvironmentData(environmentData)
+                //                     .then(response => {
+                //                         console.log('Response:', response);
+                //                     })
+                //                     .catch(error => {
+                //                         console.error('Request failed:', error);
+                //                     });
+                //             } else {
+                //                 // 处理结果为undefined的情况
+                //             }
+                //         },
+                //     );
+
+                //     return commands.executeCommand('python.envManager.refresh', true);
+                //     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                // } catch (ex) {
+                //     traceError(`环境 ${getEnvLoggingInfo(options.env)} 提交失败`, ex);
+                //     return window.showErrorMessage(`环境 ${getEnvDisplayInfo(options.env)} 提交失败, ${ex}`);
+                // }
+
+                try {
+                    await withProgress(
+                        {
+                            location: ProgressLocation.Notification,
+                            title: `提交环境 ${getEnvDisplayInfo(options.env)}`,
+                            cancellable: true,
+                        },
+                        async (
+                            progress: Progress<{ message?: string | undefined; increment?: number | undefined; }>,
+                            _token: CancellationToken
+                        ) => {
+                            console.log("push env.....");
+                            const result = await packageCondaEnv(options.env, progress, condaYml);
+                            if (result) {
+                                const { envName, localFilePath, hdfsDir } = result;
+                                console.log(`提交至项目空间：${envName}, ${localFilePath}}, ${hdfsDir}...`);
+
+                                const environmentData: EnvironmentData = {
+                                    proId,
+                                    name: `${envName}`,
+                                    hdfsPath: `${hdfsDir}`,
+                                    detail: `${condaYml}`,
+                                    createBy: getCreateBy(),
+                                    level: 1,
+                                    version,
+                                };
+
+                                await submitEnvironmentData(environmentData);
+                            }
+                        }
+                    );
+
+                    return commands.executeCommand('python.envManager.refresh', true);
+                } catch (ex) {
+                    // 同样在这里处理异常，确保类型是 Error
+                    const errorMessage = (ex as Error).message;
+                    traceError(`环境 ${getEnvLoggingInfo(options.env)} 提交失败: ${errorMessage}`);
+                    return window.showErrorMessage(`环境 ${getEnvDisplayInfo(options.env)} 提交失败: ${errorMessage}`);
                 }
             },
         ),
     );
+}
+
+function getCreateBy(): string {
+    // 检查环境变量 DSP_USER 是否存在并且非空
+    if (process.env.DSP_USER && process.env.DSP_USER.trim() !== '') {
+        return process.env.DSP_USER;
+    }
+    // 如果不存在，则执行 whoami 命令
+    try {
+        const whoamiOutput = execSync('whoami', { encoding: 'utf-8' }).trim();
+        return whoamiOutput;
+    } catch (error) {
+        console.error('no find user:', error);
+        return 'unknown'; // 返回一个默认值，防止未捕获的错误
+    }
+
+}
+
+export interface EnvironmentData {
+    proId: string;
+    name: string;
+    hdfsPath: string;
+    detail: string;
+    createBy: string;
+    level: number;
+    version: string;
+}
+
+export async function submitEnvironmentData(data: EnvironmentData): Promise<{ success: boolean; message: string }> {
+    try {
+        const response = await axios.post(`${ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr')}/api/v1/env/pyspark/environments`, data, {
+            headers: {
+                'Cookie': 'token=2345fc15-fe44-4e3b-afbc-24688c2f5f70;userId=idegw;ide_admin=1',
+                'content-type': 'application/json',
+                'operator': 'hu.tan@msxf.com'
+            }
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error submitting environment data:', error);
+        throw error;
+    }
+}
+
+async function checkEnvironmentName(proId: string, name: string, condaYml: string): Promise<string> {
+    try {
+        const url = `${ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr')}/api/v1/env/pyspark/${proId}/environments/check-name`;
+
+        const response = await axios.get(url, {
+            params: { name, condaYml },
+            headers: {
+                'Cookie': 'token=2345fc15-fe44-4e3b-afbc-24688c2f5f70;userId=idegw;ide_admin=1',
+                'Content-Type': 'application/json',
+                'operator': 'hu.tan@msxf.com'
+            }
+        });
+
+        return response.data;
+    } catch (error) {
+        console.error('Error checking environment name:', error);
+        return ""; // 出现异常时返回 false
+    }
 }

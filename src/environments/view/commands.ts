@@ -1,5 +1,6 @@
-import { Disposable, ExtensionContext, commands, window, workspace } from 'vscode';
+import { CancellationToken, Disposable, ExtensionContext, Progress, ProgressLocation, commands, window, workspace } from 'vscode';
 import {
+    createCondaEnvironment,
     exportPackages,
     installPackage,
     searchPackage,
@@ -12,8 +13,11 @@ import { EnvironmentWrapper, Package, PackageWrapper } from './types';
 import { ActiveWorkspaceEnvironment, WorkspaceFoldersTreeDataProvider } from './foldersTreeDataProvider';
 import { PythonEnvironmentsTreeDataProvider } from './environmentsTreeDataProvider';
 import { IDisposable } from '../../client/common/types';
-import { disposeAll } from '../../client/common/utils/resourceLifecycle';
 import { sleep } from '../../client/common/utils/async';
+import { withProgress } from '../../client/common/vscodeApis/windowApis';
+import { disposeAll } from '../../client/common/utils/resourceLifecycle';
+import { Common, CreateEnv } from '../../client/common/utils/localize';
+import { Commands } from '../../client/common/constants';
 
 function triggerChanges(item: unknown) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -134,6 +138,55 @@ export function registerCommands(context: ExtensionContext) {
     disposables.push(
         commands.registerCommand('python.envManager.refreshPackages', async (pkg: PackageWrapper) =>
             triggerChanges(pkg),
+        ),
+    );
+    disposables.push(
+        commands.registerCommand(
+            'python.envManager.downloadPython',
+            async (options: EnvironmentWrapper) => {
+                const { env } = options;
+                if (!env) {
+                    console.error("Can't download Python for environment.")
+                    return;
+                }
+
+                const name = options.env.environment?.name
+
+                const message = `确定要下载 python 环境 ${name} 至 IDE 吗？`;
+                const detail = `即将下载环境 ${name} 到本地`;
+                if ((await window.showInformationMessage(message, { modal: true, detail }, 'Yes')) !== 'Yes') {
+                    return;
+                }
+                try {
+                    await withProgress(
+                        {
+                            location: ProgressLocation.Notification,
+                            title: `${CreateEnv.statusTitle} ([${Common.showLogs}](command:${Commands.ViewOutput}))`,
+                            cancellable: true,
+                        },
+                        async (
+                            progress: Progress<{ message?: string | undefined; increment?: number | undefined }>,
+                            _token: CancellationToken,
+                        ) => {
+                            console.log("download env.....");
+                            console.log(`createCondaEnvironment, print level: ${JSON.stringify(options.env)}`)
+                            const result = await createCondaEnvironment(options.env, progress);
+                            if (result) {
+                                const { envName } = result;
+                                // await commands.executeCommand('python.envManager.refresh', true);
+                                console.log(`提交至项目空间：${envName}}...`);
+                                progress.report({ message: `提交至项目空间：${envName}}...` });
+                            } else {
+                                // 处理结果为undefined的情况
+                            }
+                        },
+                    );
+                    return commands.executeCommand('python.envManager.refresh');
+                } catch (ex) {
+                    traceError(`环境 ${name} 下载失败`, ex);
+                    return window.showErrorMessage(`环境 ${name} 提交失败, ${ex}`);
+                }
+            },
         ),
     );
 

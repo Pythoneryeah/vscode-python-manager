@@ -201,6 +201,7 @@ export type PythonEnvInfo = _PythonEnvInfo & {
     display?: string;
     detailedDisplayName?: string;
     searchLocation?: Uri;
+    status?: number;
 };
 
 /**

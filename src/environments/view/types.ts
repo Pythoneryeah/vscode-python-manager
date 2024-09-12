@@ -71,18 +71,21 @@ export class EnvironmentWrapper {
         defaultState: TreeItemCollapsibleState = TreeItemCollapsibleState.Collapsed,
     ) {
         const env = api.environments.known.find((e) => e.id === this.env.id);
+        // console.log(`python env mana: ${JSON.stringify(env)}`)
         if (!env) {
             const tree = new TreeItem('Not found', defaultState);
             tree.description = 'Environment no longer found, please try refreshing';
             tree.iconPath = new ThemeIcon('error');
             return tree;
         }
+
         const version = env.version ? `${env.version.major}.${env.version.minor}.${env.version.micro} ` : '';
         const label = getEnvLabel(env);
-        // const activePrefix = this.isActiveEnvironment ? 'Active: ' : '';
-        const activePrefix = '';
+        const activePrefix = this.isActiveEnvironment ? 'Active: ' : '';
+        // const activePrefix = '';
         const tree = new TreeItem(activePrefix + label + (version.trim() ? ` (${version.trim()})` : ''), defaultState);
-        const isEmptyCondaEnv = getEnvironmentType(env) === EnvironmentType.Conda && !env.executable.uri;
+        // const isEmptyCondaEnv = getEnvironmentType(env) === EnvironmentType.Conda && !env.executable.uri;
+        const isEmptyCondaEnv = false;
         const executable = getDisplayPath(env.environment?.folderUri?.fsPath || env.path);
         tree.tooltip = [version, executable].filter((item) => !!item).join('\n');
         tree.tooltip = new MarkdownString(
@@ -91,24 +94,43 @@ export class EnvironmentWrapper {
                 .join('\n'),
         );
         // If its a conda, env we can have conda envs without python, in such cases the version is empty.
-        tree.description = executable;
+        if (env.environment?.level === 0) {
+            tree.description = "public";
+        }
         // tree.contextValue = `env`;
-        const deleteContext = this.canEnvBeDeleted(getEnvironmentType(env)) ? 'canBeDeleted' : 'cannotBeDeleted';
+        const deleteContext = env.executable.sysPrefix && this.canEnvBeDeleted(getEnvironmentType(env)) ? 'canBeDeleted' : 'cannotBeDeleted';
 
         tree.contextValue = `env:${deleteContext}:${getEnvironmentType(env)} `;
-        if (this.isActiveEnvironment) {
-            tree.contextValue = `${tree.contextValue.trim()}:isActiveEnvironment`;
-        }
+        // if (this.isActiveEnvironment) {
+        //     tree.contextValue = `${tree.contextValue.trim()}:isActiveEnvironment`;
+        // }
         if (env.executable.sysPrefix) {
             tree.contextValue = `${tree.contextValue.trim()}:hasSysPrefix`;
+        } else {
+            tree.contextValue = `${tree.contextValue.trim()}:toBeDownloaded`;
         }
         if (isNonPythonCondaEnvironment(this.env)) {
             tree.contextValue = `${tree.contextValue.trim()}:isNonPythonCondaEnvironment`;
         }
-        const defaultIcon =
-            this.isActiveEnvironment === true
-                ? new ThemeIcon('star')
-                : Uri.file(path.join(EXTENSION_ROOT_DIR, 'resources/logo.svg'));
+        // const defaultIcon =
+        //     this.isActiveEnvironment === true
+        //         ? new ThemeIcon('star')
+        //         : Uri.file(path.join(EXTENSION_ROOT_DIR, 'resources/logo.svg'));
+        let defaultIcon = Uri.file(path.join(EXTENSION_ROOT_DIR, 'resources/Unavailable.svg'));
+        if (env.environment?.status === 0) {
+            defaultIcon = Uri.file(path.join(EXTENSION_ROOT_DIR, 'resources/Unavailable.svg'));
+        }
+        if (env.environment?.status === 1) {
+            tree.contextValue = `${tree.contextValue.trim()}:toBeSubmitted`;
+            defaultIcon = Uri.file(path.join(EXTENSION_ROOT_DIR, 'resources/Available.svg'));
+        }
+        if (env.environment?.status === 2) {
+            defaultIcon = Uri.file(path.join(EXTENSION_ROOT_DIR, 'resources/Submitted.svg'));
+        }
+
+        // env.status === 1
+        //     ? new ThemeIcon('star')
+        //     : Uri.file(path.join(EXTENSION_ROOT_DIR, 'resources/logo.svg'));
         // const defaultIcon = Uri.file(path.join(EXTENSION_ROOT_DIR, 'resources/logo.svg'));
         tree.iconPath = isEmptyCondaEnv ? new ThemeIcon('warning') : defaultIcon;
         return tree;

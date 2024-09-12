@@ -22,7 +22,7 @@ const logDispose: { dispose: () => void }[] = [];
 //===============================================
 // loading starts here
 import './common/extensions';
-import { ProgressLocation, ProgressOptions, window } from 'vscode';
+import { commands, NotebookCellData, NotebookCellKind, NotebookData, ProgressLocation, ProgressOptions, window, workspace } from 'vscode';
 import { IDisposableRegistry, IExtensionContext } from './common/types';
 import { createDeferred } from './common/utils/async';
 import { Common } from './common/utils/localize';
@@ -31,6 +31,7 @@ import { initializeStandard, initializeComponents, initializeGlobals } from './e
 import { IServiceContainer } from './ioc/types';
 import { IStartupDurations } from './types';
 import { disposeAll } from './common/utils/resourceLifecycle';
+import ContextManager, { PySparkParam } from './pythonEnvironments/info';
 
 durations.codeLoadingTime = stopWatch.elapsedTime;
 
@@ -44,6 +45,191 @@ let activatedServiceContainer: IServiceContainer | undefined;
 // public functions
 
 export async function activate(context: IExtensionContext): Promise<void> {
+    // 设置 context
+    ContextManager.getInstance().setContext(context);
+
+    let gatewayUri = "http://easdsp-gateway-bdpenv3-test.msxf.msxfyun.test";
+    const runEnv = process.env.RUN_ENV;
+
+    if (runEnv === 'online') {
+        console.log('当前运行环境: online');
+        gatewayUri = "http://easdsp-gateway.msxf.lo";
+    } else {
+        console.log('当前运行环境: 非 online');
+    }
+    context.globalState.update('gateway.addr', gatewayUri);
+
+    // await this.commandService.executeCommand('pyspark.paramRegister1', pySparkParam)
+    context.subscriptions.push(
+        commands.registerCommand('pyspark.paramRegister', async (pySparkParam: PySparkParam) => {
+            await context.globalState.update('pyspark.paramRegister', pySparkParam);
+            console.log(`PySparkParam-python-env: ${JSON.stringify(pySparkParam)}`);
+            await commands.executeCommand('pyspark.paramRegister.copy', pySparkParam)
+        }),
+    );
+
+    // 生成pyspark模板
+    context.subscriptions.push(
+        // commands.registerCommand('pyspark.new.notebook', async () => {
+
+
+
+        //     // 定义 Jupyter Notebook 模板内容
+        //     const templateContent = {
+        //         "cells": [
+        //             {
+        //                 "cell_type": "code",
+        //                 "metadata": {},
+        //                 "source": [
+        //                     "# PySpark Initialization\n",
+        //                     "from pyspark.sql import SparkSession\n",
+        //                     "\n",
+        //                     "# Create a Spark session\n",
+        //                     "spark = SparkSession.builder.appName('PySpark Example').getOrCreate()\n",
+        //                     "\n",
+        //                     "# Your PySpark code goes here\n",
+        //                     "data = [('Alice', 1), ('Bob', 2), ('Cathy', 3)]\n",
+        //                     "df = spark.createDataFrame(data, ['Name', 'Value'])\n",
+        //                     "df.show()\n"
+        //                 ],
+        //                 "outputs": [],
+        //                 "execution_count": null,
+        //             }
+        //         ],
+        //         "metadata": {
+        //             "kernelspec": {
+        //                 "display_name": "Python 3",
+        //                 "language": "python",
+        //                 "name": "python3"
+        //             },
+        //             "language_info": {
+        //                 "codemirror_mode": {
+        //                     "name": "ipython",
+        //                     "version": 3
+        //                 },
+        //                 "file_extension": ".py",
+        //                 "mimetype": "text/x-python",
+        //                 "name": "python",
+        //                 "nbconvert_exporter": "python",
+        //                 "pygments_lexer": "ipython3",
+        //                 "version": "3.8.8"
+        //             }
+        //         },
+        //         "nbformat": 4,
+        //         "nbformat_minor": 4
+        //     };
+
+        //     // 指定文件路径和文件名
+        //     const filePath = path.join(workspace.workspaceFolders?.[0].uri.fsPath || '', 'pyspark.ipynb');
+
+        //     // 将模板内容写入文件
+        //     fs.writeFile(filePath, JSON.stringify(templateContent, null, 2), async (err) => {
+        //         if (err) {
+        //             window.showErrorMessage(`Failed to create notebook file: ${err.message}`);
+        //             return;
+        //         }
+
+        //         // 打开生成的文件
+        //         const doc = await workspace.openTextDocument(Uri.file(filePath));
+        //         window.showTextDocument(doc);
+        //     });
+        // }),
+
+        commands.registerCommand('pyspark.new.notebook', async () => {
+
+            // // 构造一个符合 PySparkParam 类型的对象
+            // const pySparkParam: PySparkParam = {
+            //     projectId: "12345",
+            //     projectCode: "ABCDEF"
+            // };
+            // await commands.executeCommand('pyspark.paramRegister', pySparkParam)
+
+            const language = 'python';
+            // 在第一个单元格中添加 PySpark 初始化的代码
+            let initialCode = `
+# PySpark Initialization
+from pyspark.sql import SparkSession
+
+# Create a Spark session
+spark = SparkSession.builder.appName('PySpark Example').getOrCreate()
+
+# Sample data
+data = [('Alice', 1), ('Bob', 2), ('Cathy', 3)]
+
+# Create DataFrame
+df = spark.createDataFrame(data, ['Name', 'Value'])
+
+# Show DataFrame
+df.show()
+        `.trim();
+
+            try {
+                const result = await fetchPysparkTemplate('devdsp', 'source', 'pysparkNotebookTemplate');
+                console.log('PySpark Template as String:', result);
+                if (result) {
+                    // // 先替换 \\n 为真正的换行符
+                    // let formattedResult = result.replace(/\\n/g, '\n');
+                    // // 去掉两端的双引号
+                    // formattedResult = formattedResult.replace(/^"|"$/g, '');
+                    // // 替换被转义的双引号 \" 为普通双引号 "
+                    // formattedResult = formattedResult.replace(/\\"/g, '"');
+                    initialCode = result;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+
+            // 创建一个新的笔记本单元格并填充初始代码
+            const cell = new NotebookCellData(NotebookCellKind.Code, initialCode.trim(), language);
+
+            // 创建笔记本数据对象，并添加第一个单元格
+            const data = new NotebookData([cell]);
+
+            // 设置笔记本元数据
+            data.metadata = {
+                custom: {
+                    cells: [],
+                    metadata: {},
+                    nbformat: 4,
+                    nbformat_minor: 2
+                }
+            };
+
+            // 打开一个新的 Jupyter 笔记本文档
+            const doc = await workspace.openNotebookDocument('jupyter-notebook', data);
+
+            // 显示笔记本文档
+            await window.showNotebookDocument(doc);
+        }),
+
+        commands.registerCommand('pyspark.new.pyFile', async () => {
+            // 定义要填充的 PySpark 示例代码
+            let pySparkExampleCode = `# PySpark f"{xx}"Initialization\nfrom pyspark.sql import SparkSession\n\n# Create a Spark session\nspark = SparkSession.builder.appName('PySpark Example').getOrCreate()\n\n# Sample data\ndata = [('Alice', 1), ('Bob', 2), ('Cathy', 3)]\n\n# Create DataFrame\ndf = spark.createDataFrame(data, ['Name', 'Value'])\n\n# Show DataFrame\ndf.show()`.trim();
+
+            try {
+                const result = await fetchPysparkTemplate('devdsp', 'source', 'pysparkFileTemplate');
+                console.log('PySpark Template as String:', result);
+                if (result) {
+                    // 先替换 \\n 为真正的换行符
+                    let formattedResult = result.replace(/\\n/g, '\n');
+                    // 去掉两端的双引号
+                    formattedResult = formattedResult.replace(/^"|"$/g, '');
+                    // 替换被转义的双引号 \" 为普通双引号 "
+                    formattedResult = formattedResult.replace(/\\"/g, '"');
+                    pySparkExampleCode = formattedResult;
+                }
+            } catch (error) {
+                console.error('fetch pysparkFileTemplate Error:', error);
+            }
+
+            // 创建一个新的 Python 文件并填充内容
+            const newFile = await workspace.openTextDocument({ language: 'python', content: pySparkExampleCode });
+
+            // 显示新建的文件
+            window.showTextDocument(newFile);
+        }),
+    );
+
     await activateUnsafe(context, stopWatch, durations);
 }
 
@@ -102,4 +288,34 @@ async function activateUnsafe(
 function displayProgress(promise: Promise<any>) {
     const progressOptions: ProgressOptions = { location: ProgressLocation.Window, title: Common.loadingExtension };
     window.withProgress(progressOptions, () => promise);
+}
+
+
+import axios from 'axios';
+
+async function fetchPysparkTemplate(cfg_sys: string, cfg_group: string, cfg_key: string): Promise<string> {
+    const url = `${ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr')}/api/v1/env/pyspark/${cfg_sys}/${cfg_group}/${cfg_key}`;
+
+    try {
+        const response = await axios.get(url, {
+            headers: {
+                'Cookie': 'token=2345fc15-fe44-4e3b-afbc-24688c2f5f70;userId=idegw',
+                'Content-Type': 'application/json',
+                'operator': 'hu.tan@msxf.com'
+            }
+        });
+
+        if (response.status === 200) {
+            const data = response.data;
+
+            // Convert the JSON data to a string
+            // const jsonString = JSON.stringify(data);
+            return data;
+        } else {
+            throw new Error(`Failed to fetch data. Status code: ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Error fetching PySpark template:', error);
+        throw error;
+    }
 }

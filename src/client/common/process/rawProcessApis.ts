@@ -191,6 +191,22 @@ export function execObservable(
     const spawnOptions = getDefaultOptions(options, defaultEnv);
     const encoding = spawnOptions.encoding ? spawnOptions.encoding : 'utf8';
     const proc = spawn(file, args, spawnOptions);
+
+    // Log the standard output
+    proc.stdout?.on('data', (data) => {
+        console.log(`stdout: ${data}`);
+    });
+
+    // Log the standard error
+    proc.stderr?.on('data', (data) => {
+        console.error(`stderr: ${data}`);
+    });
+
+    // Log when the child process exits
+    proc.on('close', (code) => {
+        console.log(`child process exited with code ${code}`);
+    });
+
     let procExited = false;
     const disposable: IDisposable = {
         dispose() {

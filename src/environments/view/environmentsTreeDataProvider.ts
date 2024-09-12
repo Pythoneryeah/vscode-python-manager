@@ -20,7 +20,7 @@ import { getCondaVersion } from '../tools/conda';
 import { noop } from '../../client/common/utils/misc';
 import { clearCacheIfNewVersionInstalled } from '../cache';
 import { sleep } from '../../client/common/utils/async';
-import { getEnvironmentType, isNonPythonCondaEnvironment } from '../utils';
+import { getEnvironmentType } from '../utils';
 import { IServiceContainer } from '../../client/ioc/types';
 import { getPyEnvVersion } from '../tools/pyenv';
 import { canEnvBeCreated } from '../envCreation';
@@ -87,6 +87,7 @@ export class PythonEnvironmentsTreeDataProvider implements TreeDataProvider<Pyth
     }
 
     private rebuildEnvironmentTypesIfRequired() {
+        // const a = this.api.environments.known;
         const envs = new Set(this.api.environments.known.map((item) => getEnvironmentType(item)));
         if (envs.size !== this.environmentTypes.size) {
             if (
@@ -96,6 +97,8 @@ export class PythonEnvironmentsTreeDataProvider implements TreeDataProvider<Pyth
             ) {
                 envs.add(EnvironmentType.Venv);
             }
+            // const environmentTypes: Set<EnvironmentType> = new Set();
+            // envs.forEach(() => environmentTypes.add(EnvironmentType.Venv));
             Array.from(envs)
                 .filter((type) => !this.environmentTypes.has(type))
                 .forEach((type) => this.environmentTypes.set(type, new EnvironmentTypeWrapper(type)));
@@ -133,26 +136,39 @@ export class PythonEnvironmentsTreeDataProvider implements TreeDataProvider<Pyth
         if (typeof element !== 'string') {
             return this.envTreeDataProvider.getChildren(element);
         }
+
         return this.api.environments.known
             .filter((env) => getEnvironmentType(env) === element)
-            .sort((a, b) => getEnvLabel(a).localeCompare(getEnvLabel(b)))
+            // .sort((a, b) => getEnvLabel(b).localeCompare(getEnvLabel(a)))
+            .sort((a, b) => {
+                const levelA = a.environment?.level ?? Number.MAX_SAFE_INTEGER;
+                const levelB = b.environment?.level ?? Number.MAX_SAFE_INTEGER;
+
+                // 先根据 level 排序，level 为 0 的优先
+                if (levelA !== levelB) {
+                    return levelA - levelB;
+                }
+
+                // 如果 level 相同，按自然顺序排序
+                return getEnvLabel(a).localeCompare(getEnvLabel(b));
+            })
             .map((env) => {
                 if (!this.interpreterInfo.has(env.id)) {
-                    this.interpreterInfo.set(env.id, new EnvironmentWrapper(env, canEnvBeDeleted));
+                    this.interpreterInfo.set(env.id, new EnvironmentWrapper(env, canEnvBeDeleted, undefined, undefined));
                 }
                 return this.interpreterInfo.get(env.id)!;
             })
-            .sort((a, b) => {
-                if (isNonPythonCondaEnvironment(a.env) && !isNonPythonCondaEnvironment(b.env)) {
-                    return 1;
-                }
-                if (!isNonPythonCondaEnvironment(a.env) && isNonPythonCondaEnvironment(b.env)) {
-                    return -1;
-                }
-                return (a.asTreeItem(this.api).label || '')
-                    .toString()
-                    .localeCompare((b.asTreeItem(this.api).label || '').toString());
-            });
+        // .sort((a, b) => {
+        //     if (isNonPythonCondaEnvironment(a.env) && !isNonPythonCondaEnvironment(b.env)) {
+        //         return 1;
+        //     }
+        //     if (!isNonPythonCondaEnvironment(a.env) && isNonPythonCondaEnvironment(b.env)) {
+        //         return -1;
+        //     }
+        //     return (a.asTreeItem(this.api).label || '')
+        //         .toString()
+        //         .localeCompare((b.asTreeItem(this.api).label || '').toString());
+        // });
     }
     public async refresh(clearCache = false) {
         if (this.refreshing) {

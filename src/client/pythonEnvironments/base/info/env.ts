@@ -92,7 +92,8 @@ export function areEnvsDeepEqual(env1: PythonEnvInfo, env2: PythonEnvInfo): bool
     return (
         isEqual(env1Clone, env2Clone) &&
         arePathsSame(searchLocation1, searchLocation2) &&
-        searchLocation1Scheme === searchLocation2Scheme
+        searchLocation1Scheme === searchLocation2Scheme &&
+        env1.status === env2.status
     );
 }
 

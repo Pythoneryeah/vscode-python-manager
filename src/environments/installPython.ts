@@ -10,6 +10,7 @@ import { refreshUntilNewEnvIsAvailable } from './view/environmentsTreeDataProvid
 export function activate(context: ExtensionContext) {
     context.subscriptions.push(
         commands.registerCommand('python.envManager.installPython', async () => {
+            console.info("this is installPython")
             if (await fs.pathExists(MICROMAMBA_EXE)) {
                 const message = [
                     `Python is already setup via Micromamba. Please use Micromamba found here ${getDisplayPath(
