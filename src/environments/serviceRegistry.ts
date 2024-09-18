@@ -13,7 +13,7 @@ import { activate as activateSetActiveInterpreter } from './activeInterpreter';
 import { PythonEnvironmentsTreeDataProvider } from './view/environmentsTreeDataProvider';
 // import { WorkspaceFoldersTreeDataProvider } from './view/foldersTreeDataProvider';
 import { registerCommands } from './view/commands';
-import { PySparkParam } from '../client/pythonEnvironments/info';
+import CacheMap from '../client/pythonEnvironments/common/windowsUtils';
 
 
 export function registerTypes(serviceManager: IServiceManager, context: ExtensionContext): void {
@@ -29,19 +29,16 @@ export function registerTypes(serviceManager: IServiceManager, context: Extensio
             commands.registerCommand('python.envManager.refresh', (forceRefresh = true) => {
                 console.log("force111:", forceRefresh);
 
-                // 获取存储的 PySparkParam 对象
-                const pySparkParam = context.globalState.get<PySparkParam>('pyspark.paramRegister');
+                const projectId = CacheMap.getInstance().get('projectId');
+                const projectCode = CacheMap.getInstance().get('projectCode');
 
                 // 检查是否成功获取到数据
-                if (pySparkParam) {
-                    // 通过属性名获取 projectId 和 projectCode
-                    const { projectId } = pySparkParam;
-                    const { projectCode } = pySparkParam;
-
-                    console.log(`Project ID: ${projectId}`);
-                    console.log(`Project Code: ${projectCode}`);
+                // if (pySparkParam) {
+                if (projectId && projectCode) {
+                    console.log(`fetchEnvironments Project ID: ${projectId}`);
+                    console.log(`fetchEnvironments Project Code: ${projectCode}`);
                 } else {
-                    console.log('No PySparkParam found in global state.');
+                    console.log('No PySparkParam found in global state. 3');
                 }
 
                 treeDataProvider.refresh(forceRefresh);

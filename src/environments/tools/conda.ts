@@ -17,7 +17,7 @@ import { getDisplayPath, getEnvDisplayInfo, getEnvLoggingInfo, home } from '../h
 import { MICROMAMBA_ROOTPREFIX } from '../micromamba/constants';
 import { isCondaEnvironment } from '../utils';
 import { SpawnOptions } from '../../client/common/process/types';
-import ContextManager, { PySparkParam } from '../../client/pythonEnvironments/info';
+import CacheMap from '../../client/pythonEnvironments/common/windowsUtils';
 
 export type CondaPackageInfo = {
     // eslint-disable-next-line camelcase
@@ -336,23 +336,27 @@ export async function packageCondaEnv(
 
     // 生成一个 UUID
     const uniqueId = uuidv4();
-    const pySparkParam = ContextManager.getInstance().getContext().globalState.get<PySparkParam>('pyspark.paramRegister');
 
-    let proId = "0";
+    const projectId = CacheMap.getInstance().get('projectId');
+    const projectCode = CacheMap.getInstance().get('projectCode');
+
+    let proId = '0';
     // 检查是否成功获取到数据
-    if (pySparkParam) {
+    // if (pySparkParam) {
+    if (projectId && projectCode) {
         // 通过属性名获取 projectId 和 projectCode
-        const { projectId } = pySparkParam;
-        const { projectCode } = pySparkParam;
+        // const { projectId } = pySparkParam;
+        // const { projectCode } = pySparkParam;
 
-        console.log(`createCondaEnvironment Project ID: ${projectId}`);
-        console.log(`createCondaEnvironment Project Code: ${projectCode}`);
-
-        if (projectId) {
-            proId = projectId;
-        }
+        console.log(`fetchEnvironments Project ID: ${projectId}`);
+        console.log(`fetchEnvironments Project Code: ${projectCode}`);
+        proId = projectId;
+        // if (projectId) {
+        //     proId = projectId;
+        // }
     } else {
-        console.log('No PySparkParam found in global state.');
+        console.log('No PySparkParam found in global state. 4');
+        window.showErrorMessage(`环境 ${env.environment.name} 提交失败：No PySparkParam found in global state.`);
         return;
     }
 
@@ -381,10 +385,10 @@ export async function packageCondaEnv(
     const envName = `pri_${proId}_${env.environment?.name}.tar.gz`
     const filePath = `/tmp/${uniqueId}_${envName}`;
 
-    console.log(`start package env: conda-pack ${args.concat(['-o', filePath])}`);
+    console.log(`start package env: conda-pack ${args.concat(['-o', filePath, "--ignore-missing-files"])}`);
 
     try {
-        const result = execObservable("conda-pack", args.concat(['-o', filePath]), { timeout: 600_000 });
+        const result = execObservable("conda-pack", args.concat(['-o', filePath, "--ignore-missing-files"]), { timeout: 600_000 });
         await new Promise<void>((resolve, reject) => {
             result.out.subscribe({
                 next: (output) => progress.report({ message: output.out }),
@@ -437,7 +441,9 @@ async function checkReusableEnvironment(
     textContent: string
 ): Promise<ReusableEnvironmentResponse> {
     try {
-        const url = `${ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr')}/api/v1/env/pyspark/reusable-environment-check`;
+        const gatewayUri = CacheMap.getInstance().get("gatewayUri")
+        console.log(`gatewayUri: ${gatewayUri}}`)
+        const url = `${gatewayUri}/api/v1/env/pyspark/reusable-environment-check`;
 
         const data = {
             projectId: -1, // Mandatory field
@@ -549,7 +555,9 @@ async function uploadEnvironmentPackage(
     targetPath: string
 ): Promise<UploadResponse> {
     try {
-        const url = `${ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr')}/api/v1/env/pyspark/${proId}/environment-packages/upload`;
+        const gatewayUri = CacheMap.getInstance().get("gatewayUri")
+        console.log(`gatewayUri: ${gatewayUri}}`)
+        const url = `${gatewayUri}/api/v1/env/pyspark/${proId}/environment-packages/upload`;
 
         const data = {
             name,

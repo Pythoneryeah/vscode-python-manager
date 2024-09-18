@@ -7,7 +7,7 @@ import { exportCondaEnv, packageCondaEnv } from './tools/conda';
 
 import { traceError } from '../client/logging';
 import { withProgress } from '../client/common/vscodeApis/windowApis';
-import ContextManager, { PySparkParam } from '../client/pythonEnvironments/info';
+import CacheMap from '../client/pythonEnvironments/common/windowsUtils';
 
 export function activate(context: ExtensionContext) {
     context.subscriptions.push(
@@ -53,26 +53,25 @@ export function activate(context: ExtensionContext) {
                     return window.showErrorMessage(`环境元数据异常~`);
                 }
 
-                // const context1 = ContextManager.getInstance().getContext()
-                // traceError(context1 === context)
-                // const addr = ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr');
-                // traceError(addr);
-                // const addr1 = context.globalState.get<string>('gateway.addr');
-                // traceError(addr1);
-                // 获取存储的 PySparkParam 对象
-                const pySparkParam = context.globalState.get<PySparkParam>('pyspark.paramRegister');
-                // const pySparkParam = ContextManager.getInstance().getContext().globalState.get<PySparkParam>('pyspark.paramRegister');
-                let proId = "";
+                const projectId = CacheMap.getInstance().get('projectId');
+                const projectCode = CacheMap.getInstance().get('projectCode');
+
+                let proId = '0';
                 // 检查是否成功获取到数据
-                if (pySparkParam) {
+                // if (pySparkParam) {
+                if (projectId && projectCode) {
                     // 通过属性名获取 projectId 和 projectCode
-                    const { projectId } = pySparkParam;
-                    const { projectCode } = pySparkParam;
+                    // const { projectId } = pySparkParam;
+                    // const { projectCode } = pySparkParam;
+
+                    console.log(`fetchEnvironments Project ID: ${projectId}`);
+                    console.log(`fetchEnvironments Project Code: ${projectCode}`);
                     proId = projectId;
-                    console.log(`submitEnv Project ID: ${projectId}`);
-                    console.log(`submitEnv Project Code: ${projectCode}`);
+                    // if (projectId) {
+                    //     proId = projectId;
+                    // }
                 } else {
-                    console.log('No PySparkParam found in global state.');
+                    console.log('No PySparkParam found in global state. 1');
                     window.showErrorMessage(`环境 ${name} 提交失败：No PySparkParam found in global state.`);
                     return;
                 }
@@ -212,7 +211,9 @@ export interface EnvironmentData {
 
 export async function submitEnvironmentData(data: EnvironmentData): Promise<{ success: boolean; message: string }> {
     try {
-        const response = await axios.post(`${ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr')}/api/v1/env/pyspark/environments`, data, {
+        const gatewayUri = CacheMap.getInstance().get("gatewayUri")
+        console.log(`gatewayUri: ${gatewayUri}}`)
+        const response = await axios.post(`${gatewayUri}/api/v1/env/pyspark/environments`, data, {
             headers: {
                 'Cookie': 'token=2345fc15-fe44-4e3b-afbc-24688c2f5f70;userId=idegw;ide_admin=1',
                 'content-type': 'application/json',
@@ -228,7 +229,9 @@ export async function submitEnvironmentData(data: EnvironmentData): Promise<{ su
 
 async function checkEnvironmentName(proId: string, name: string, condaYml: string): Promise<string> {
     try {
-        const url = `${ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr')}/api/v1/env/pyspark/${proId}/environments/check-name`;
+        const gatewayUri = CacheMap.getInstance().get("gatewayUri")
+        console.log(`gatewayUri: ${gatewayUri}}`)
+        const url = `${gatewayUri}/api/v1/env/pyspark/${proId}/environments/check-name`;
 
         const response = await axios.get(url, {
             params: { name, condaYml },

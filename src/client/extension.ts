@@ -31,7 +31,7 @@ import { initializeStandard, initializeComponents, initializeGlobals } from './e
 import { IServiceContainer } from './ioc/types';
 import { IStartupDurations } from './types';
 import { disposeAll } from './common/utils/resourceLifecycle';
-import ContextManager, { PySparkParam } from './pythonEnvironments/info';
+import { PySparkParam } from './pythonEnvironments/info';
 
 durations.codeLoadingTime = stopWatch.elapsedTime;
 
@@ -45,26 +45,36 @@ let activatedServiceContainer: IServiceContainer | undefined;
 // public functions
 
 export async function activate(context: IExtensionContext): Promise<void> {
-    // 设置 context
-    ContextManager.getInstance().setContext(context);
 
-    let gatewayUri = "http://easdsp-gateway-bdpenv3-test.msxf.msxfyun.test";
-    const runEnv = process.env.RUN_ENV;
-
-    if (runEnv === 'online') {
-        console.log('当前运行环境: online');
-        gatewayUri = "http://easdsp-gateway.msxf.lo";
-    } else {
-        console.log('当前运行环境: 非 online');
-    }
-    context.globalState.update('gateway.addr', gatewayUri);
-
-    // await this.commandService.executeCommand('pyspark.paramRegister1', pySparkParam)
     context.subscriptions.push(
-        commands.registerCommand('pyspark.paramRegister', async (pySparkParam: PySparkParam) => {
-            await context.globalState.update('pyspark.paramRegister', pySparkParam);
+        commands.registerCommand('pyspark.paramRegister', (pySparkParam: PySparkParam) => {
             console.log(`PySparkParam-python-env: ${JSON.stringify(pySparkParam)}`);
-            await commands.executeCommand('pyspark.paramRegister.copy', pySparkParam)
+            commands.executeCommand('pyspark.paramRegister.copy', pySparkParam)
+
+            // 设置 context
+            console.log("set CacheMap.");
+            const cache = CacheMap.getInstance();
+            // 设置缓存值
+            if (pySparkParam) {
+                const { projectId } = pySparkParam;
+                const { projectCode } = pySparkParam;
+                cache.set('projectId', projectId);
+                cache.set('projectCode', projectCode);
+            } else {
+                console.log('No PySparkParam found in global state. activate()');
+                return;
+            }
+
+            let gatewayUri = "http://easdsp-gateway-bdpenv3-test.msxf.msxfyun.test";
+            const runEnv = process.env.RUN_ENV;
+
+            if (runEnv === 'online') {
+                console.log('当前运行环境: online');
+                gatewayUri = "http://easdsp-gateway.msxf.lo";
+            } else {
+                console.log('当前运行环境: 非 online');
+            }
+            cache.set("gatewayUri", gatewayUri)
         }),
     );
 
@@ -136,13 +146,6 @@ export async function activate(context: IExtensionContext): Promise<void> {
         // }),
 
         commands.registerCommand('pyspark.new.notebook', async () => {
-
-            // // 构造一个符合 PySparkParam 类型的对象
-            // const pySparkParam: PySparkParam = {
-            //     projectId: "12345",
-            //     projectCode: "ABCDEF"
-            // };
-            // await commands.executeCommand('pyspark.paramRegister', pySparkParam)
 
             const language = 'python';
             // 在第一个单元格中添加 PySpark 初始化的代码
@@ -292,9 +295,12 @@ function displayProgress(promise: Promise<any>) {
 
 
 import axios from 'axios';
+import CacheMap from './pythonEnvironments/common/windowsUtils';
 
 async function fetchPysparkTemplate(cfg_sys: string, cfg_group: string, cfg_key: string): Promise<string> {
-    const url = `${ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr')}/api/v1/env/pyspark/${cfg_sys}/${cfg_group}/${cfg_key}`;
+    const gatewayUri = CacheMap.getInstance().get("gatewayUri")
+    console.log(`gatewayUri: ${gatewayUri}}`)
+    const url = `${gatewayUri}/api/v1/env/pyspark/${cfg_sys}/${cfg_group}/${cfg_key}`;
 
     try {
         const response = await axios.get(url, {

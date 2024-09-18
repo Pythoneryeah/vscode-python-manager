@@ -31,7 +31,7 @@ import {
     updateCondaPackages,
 } from './tools/conda';
 import { getEnvironmentType, isCondaEnvironment } from './utils';
-import ContextManager, { EnvironmentType, PySparkParam } from '../client/pythonEnvironments/info';
+import { EnvironmentType } from '../client/pythonEnvironments/info';
 import {
     exportPoetryPackages,
     getPoetryPackageInstallSpawnOptions,
@@ -44,6 +44,7 @@ import { getEnvLoggingInfo, reportStdOutProgress } from './helpers';
 import { searchPackageWithProvider } from './packageSearch';
 import { Conda } from '../client/pythonEnvironments/common/environmentManagers/conda';
 import { execObservable } from '../client/common/process/rawProcessApis';
+import CacheMap from '../client/pythonEnvironments/common/windowsUtils';
 
 
 export type PackageInfo = PipPackageInfo | CondaPackageInfo;
@@ -169,7 +170,9 @@ async function fetchPySparkEnvironmentMeta(proId: string, name: string, level: n
         if (level === undefined || level === null) {
             level = 1;
         }
-        const response = await axios.get<PySparkEnvironmentMeta>(`${ContextManager.getInstance().getContext().globalState.get<string>('gateway.addr')}/api/v1/env/pyspark/meta`, {
+        const gatewayUri = CacheMap.getInstance().get("gatewayUri")
+        console.log(`gatewayUri: ${gatewayUri}}`)
+        const response = await axios.get<PySparkEnvironmentMeta>(`${gatewayUri}/api/v1/env/pyspark/meta`, {
             params: { proId, name, level },
             headers: {
                 'Cookie': 'token=2345fc15-fe44-4e3b-afbc-24688c2f5f70;userId=idegw',
@@ -239,25 +242,39 @@ export async function createCondaEnvironment(
     // const hdfs = `hdfs://ms-dwh/tmp/${env.environment?.name}.tar.gz`
     // 调用示例
     // const proId = 1;
-    // 获取存储的 PySparkParam 对象
-    const pySparkParam = ContextManager.getInstance().getContext().globalState.get<PySparkParam>('pyspark.paramRegister');
+
+    const cache = CacheMap.getInstance();
+    const projectId = cache.get('projectId');
+    const projectCode = cache.get('projectCode');
 
     let proId = "0";
-    // 检查是否成功获取到数据
-    if (pySparkParam) {
-        // 通过属性名获取 projectId 和 projectCode
-        const { projectId } = pySparkParam;
-        const { projectCode } = pySparkParam;
-
+    if (projectId && projectCode) {
+        proId = projectId;
         console.log(`createCondaEnvironment Project ID: ${projectId}`);
         console.log(`createCondaEnvironment Project Code: ${projectCode}`);
-
-        if (projectId) {
-            proId = projectId;
-        }
     } else {
-        console.log('No PySparkParam found in global state.');
+        console.log('No PySparkParam found in global state. 12');
+        window.showErrorMessage(`环境 ${env.environment.name} 下载失败：No PySparkParam found in global state.`);
+        return;
     }
+
+    // // 检查是否成功获取到数据
+    // if (pySparkParam) {
+    //     // 通过属性名获取 projectId 和 projectCode
+    //     const { projectId } = pySparkParam;
+    //     const { projectCode } = pySparkParam;
+
+    //     console.log(`createCondaEnvironment Project ID: ${projectId}`);
+    //     console.log(`createCondaEnvironment Project Code: ${projectCode}`);
+
+    //     if (projectId) {
+    //         proId = projectId;
+    //     }
+    // } else {
+    //     console.log('No PySparkParam found in global state. 2');
+    //     window.showErrorMessage(`环境 ${env.environment.name} 下载失败：No PySparkParam found in global state.`);
+    //     return;
+    // }
     await fetchPySparkEnvironmentMeta(proId, env.environment.name, env.environment.level)
         .then(async (data) => {
             console.log('Environment Meta:', data);
